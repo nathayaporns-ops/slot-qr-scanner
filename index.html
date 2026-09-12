@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050b08">
+<title>Live QR Scanner</title>
+<style>
+:root{color-scheme:dark;--accent:#42e482;--muted:#b8c5bd}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.shell{position:relative;width:100%;height:100%;min-height:100dvh;background:#000}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scrim{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent 25%,transparent 68%,rgba(0,0,0,.72))}
+.top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:18px}
+.title{font-weight:850;font-size:19px;text-shadow:0 2px 8px #000}
+.btn{border:1px solid rgba(255,255,255,.2);background:rgba(5,11,8,.64);backdrop-filter:blur(10px);color:#fff;border-radius:999px;padding:10px 15px;font-size:14px;font-weight:750}
+.center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.frame{position:relative;width:min(72vw,330px);aspect-ratio:1;border-radius:26px}
+.corner{position:absolute;width:60px;height:60px;border-color:var(--accent);border-style:solid;filter:drop-shadow(0 0 9px rgba(66,228,130,.45))}
+.tl{top:0;left:0;border-width:5px 0 0 5px;border-radius:20px 0 0 0}.tr{top:0;right:0;border-width:5px 5px 0 0;border-radius:0 20px 0 0}.bl{bottom:0;left:0;border-width:0 0 5px 5px;border-radius:0 0 0 20px}.br{bottom:0;right:0;border-width:0 5px 5px 0;border-radius:0 0 20px 0}
+.line{position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);box-shadow:0 0 14px var(--accent);animation:s 2s ease-in-out infinite}@keyframes s{0%{top:13%;opacity:.4}50%{top:84%;opacity:1}100%{top:13%;opacity:.4}}
+.bottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:12px;padding:18px 18px max(22px,env(safe-area-inset-bottom))}
+.status{width:min(92vw,520px);text-align:center;background:rgba(5,11,8,.72);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.13);border-radius:16px;padding:13px 15px;font-size:15px;font-weight:800}
+.hint{font-size:13px;color:var(--muted);font-weight:500;margin-top:4px}.actions{display:flex;gap:10px}.hidden{display:none!important}
+.error{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(circle at 50% 30%,#173423,#050b08 65%)}
+.card{width:min(92vw,450px);background:#0d1912;border:1px solid rgba(255,255,255,.12);border-radius:22px;padding:22px;text-align:center}.card h1{font-size:22px;margin:0 0 8px}.card p{color:var(--muted);line-height:1.55}.retry{width:100%;border:0;border-radius:14px;padding:14px;background:var(--accent);color:#062010;font-size:16px;font-weight:900}.code{margin-top:12px;padding:10px;border-radius:12px;background:#07100b;word-break:break-all;font-family:monospace;font-size:13px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+</head>
+<body>
+<div class="shell" id="cameraView">
+  <video id="video" playsinline muted autoplay></video>
+  <div class="scrim"></div>
+  <div class="top"><div class="title">สแกน QR</div><button class="btn" id="closeBtn">ปิด</button></div>
+  <div class="center"><div class="frame"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><i class="line"></i></div></div>
+  <div class="bottom">
+    <div class="status" id="status">เล็ง QR ให้อยู่ในกรอบ<div class="hint">อ่านอัตโนมัติ • ไม่ถ่ายรูป • ไม่อัปโหลดรูป</div></div>
+    <div class="actions"><button class="btn hidden" id="torchBtn">เปิดไฟ</button><button class="btn" id="switchBtn">สลับกล้อง</button></div>
+  </div>
+</div>
+<div class="error hidden" id="errorView"><div class="card"><h1>เปิดกล้องไม่ได้</h1><p id="errorText">กรุณาอนุญาตสิทธิ์กล้อง</p><button class="retry" id="retryBtn">ลองอีกครั้ง</button><div class="code hidden" id="resultCode"></div></div></div>
+<canvas id="canvas" class="hidden"></canvas>
+<script>
+(()=>{'use strict';
+const p=new URLSearchParams(location.search),target=['po','booking','door'].includes(p.get('target'))?p.get('target'):'po',nonce=p.get('nonce')||'',returnOrigin=p.get('returnOrigin')||'*';
+const v=document.getElementById('video'),c=document.getElementById('canvas'),x=c.getContext('2d',{willReadFrequently:true}),st=document.getElementById('status'),ev=document.getElementById('errorView'),et=document.getElementById('errorText'),rb=document.getElementById('retryBtn'),cb=document.getElementById('closeBtn'),tb=document.getElementById('torchBtn'),sb=document.getElementById('switchBtn'),rc=document.getElementById('resultCode');
+let stream=null,track=null,facing='environment',running=false,done=false,detector=null,torch=false,last=0;
+function stop(){running=false;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;track=null}
+function close(){stop();try{window.close()}catch(_){}setTimeout(()=>{try{history.back()}catch(_){}},120)}
+cb.onclick=close;
+async function start(){if(done)return;stop();ev.classList.add('hidden');document.getElementById('cameraView').classList.remove('hidden');st.innerHTML='กำลังเปิดกล้อง…<div class="hint">อนุญาตสิทธิ์ Camera เมื่อระบบถาม</div>';try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facing},width:{ideal:1920},height:{ideal:1080}}});v.srcObject=stream;await v.play();track=stream.getVideoTracks()[0];running=true;tb.classList.add('hidden');try{const cap=track.getCapabilities?track.getCapabilities():{};if(cap.torch)tb.classList.remove('hidden')}catch(_){}if('BarcodeDetector'in window){try{const f=await BarcodeDetector.getSupportedFormats();if(f.includes('qr_code'))detector=new BarcodeDetector({formats:['qr_code']})}catch(_){}}st.innerHTML='เล็ง QR ให้อยู่ในกรอบ<div class="hint">อ่านอัตโนมัติ • ไม่ถ่ายรูป • ไม่อัปโหลดรูป</div>';requestAnimationFrame(loop)}catch(e){showError(e)}}
+function showError(e){stop();document.getElementById('cameraView').classList.add('hidden');ev.classList.remove('hidden');const n=e&&e.name||'';et.textContent=(n==='NotAllowedError'||n==='PermissionDeniedError')?'สิทธิ์กล้องถูกปิด กรุณาอนุญาต Camera สำหรับเว็บไซต์นี้แล้วลองอีกครั้ง':n==='NotFoundError'?'ไม่พบกล้องในอุปกรณ์นี้':'เปิดกล้องไม่สำเร็จ กรุณาลองอีกครั้ง'}
+rb.onclick=start;
+tb.onclick=async()=>{if(!track)return;try{torch=!torch;await track.applyConstraints({advanced:[{torch}]});tb.textContent=torch?'ปิดไฟ':'เปิดไฟ'}catch(_){}};
+sb.onclick=async()=>{facing=facing==='environment'?'user':'environment';detector=null;await start()};
+async function loop(ts){if(!running||done)return;if(v.readyState>=2&&ts-last>180){last=ts;let value='';if(detector){try{const hits=await detector.detect(v);if(hits&&hits[0]&&hits[0].rawValue)value=String(hits[0].rawValue).trim()}catch(_){}}if(!value&&typeof jsQR==='function'){try{const vw=v.videoWidth,vh=v.videoHeight;if(vw&&vh){const mx=900,sc=Math.min(1,mx/Math.max(vw,vh)),w=Math.max(1,Math.round(vw*sc)),h=Math.max(1,Math.round(vh*sc));c.width=w;c.height=h;x.drawImage(v,0,0,w,h);const im=x.getImageData(0,0,w,h),q=jsQR(im.data,w,h,{inversionAttempts:'attemptBoth'});if(q&&q.data)value=String(q.data).trim()}}catch(_){}}if(value)return complete(value)}requestAnimationFrame(loop)}
+function complete(value){if(done)return;done=true;try{navigator.vibrate&&navigator.vibrate(80)}catch(_){}stop();st.innerHTML='สแกนสำเร็จ<div class="hint">กำลังส่งกลับหน้า Booking…</div>';const data={source:'slot-qr-scanner',target,nonce,value};let sent=false;try{if(window.opener&&!window.opener.closed){window.opener.postMessage(data,returnOrigin);sent=true}}catch(_){}if(sent){setTimeout(()=>{try{window.close()}catch(_){}},220);setTimeout(()=>{if(!window.closed){document.getElementById('cameraView').classList.add('hidden');ev.classList.remove('hidden');et.textContent='ส่งข้อมูลกลับแล้ว หากหน้านี้ยังไม่ปิดให้กลับไปหน้า Booking';rc.textContent=value;rc.classList.remove('hidden')}},850)}else{document.getElementById('cameraView').classList.add('hidden');ev.classList.remove('hidden');et.textContent='อ่าน QR สำเร็จ แต่ไม่พบหน้า Booking ที่เปิด Scanner';rc.textContent=value;rc.classList.remove('hidden')}}
+if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)showError(new Error('unavailable'));else start();
+})();
+</script>
+</body>
+</html>
